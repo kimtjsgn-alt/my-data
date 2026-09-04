@@ -78,8 +78,17 @@ window_size = st.sidebar.slider(
     "이동평균(Moving Average) 구간 (년)", min_value=1, max_value=20, value=10
 )
 
+# 이상 지점 표시 옵션 추가
+st.sidebar.markdown("---")
+st.sidebar.subheader("🚨 이상 지점(Outlier) 시각화")
+show_outliers = st.sidebar.checkbox(
+    "역대 최고/최저 기온 및 이상 지점 강조 표시", value=True
+)
+
 # 선택된 연도 범위로 데이터 필터링
-filtered_df = df[(df["연도"] >= year_range[0]) & (df["연도"] <= year_range[1])]
+filtered_df = df[
+    (df["연도"] >= year_range[0]) & (df["연도"] <= year_range[1])
+].copy()
 
 # 연도별 집계 (최소 300일 이상 관측된 해)
 year_counts = filtered_df.groupby("연도")["평균기온"].count()
@@ -182,6 +191,43 @@ if len(annual_df) > 1:
       )
   )
 
+# 이상 지점 강조 표시 (IQR 기준 이상치 및 역대 최고/최저 지점)
+if show_outliers and not annual_df.empty:
+  q1 = annual_df["연평균기온"].quantile(0.25)
+  q3 = annual_df["연평균기온"].quantile(0.75)
+  iqr = q3 - q1
+  lower_bound = q1 - 1.5 * iqr
+  upper_bound = q3 + 1.5 * iqr
+
+  # 통계적 이상치 또는 최고/최저 연도 지점 추출
+  outliers = annual_df[
+      (annual_df["연평균기온"] < lower_bound)
+      | (annual_df["연평균기온"] > upper_bound)
+      | (annual_df["연도"] == hottest_year["연도"])
+      | (annual_df["연도"] == coldest_year["연도"])
+  ].drop_duplicates(subset=["연도"])
+
+  fig.add_trace(
+      go.Scatter(
+          x=outliers["연도"],
+          y=outliers["연평균기온"],
+          mode="markers+text",
+          name="이상 지점 / 극값",
+          marker=dict(
+              color="red",
+              size=12,
+              symbol="diamond",
+              line=dict(color="black", width=1),
+          ),
+          text=[
+              f"{int(y)}년 ({t:.1f}°C)"
+              for y, t in zip(outliers["연도"], outliers["연평균기온"])
+          ],
+          textposition="top center",
+          hovertemplate="특이점: %{x}년 (%{y:.2f}°C)<extra></extra>",
+      )
+  )
+
 fig.update_layout(
     title=dict(
         text=f"서울 연도별 평균 기온 ({year_range[0]}년 ~ {year_range[1]}년)",
@@ -197,7 +243,7 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# 데이터 분석 및 요약 통계 탭 생성 (오류 해결 포인트: tab1, tab2, tab3을 먼저 선언)
+# 데이터 분석 및 요약 통계 탭
 st.subheader("📊 데이터 분석 및 요약 통계")
 tab1, tab2, tab3 = st.tabs(
     ["📋 원본데이터 요약 통계", "🌡️ 최저/최고 기온 범위", "📑 연도별 데이터 테이블"]
@@ -210,7 +256,6 @@ with tab1:
       " 기온 항목)"
   )
 
-  # 일별 데이터 요약통계 계산 후 전치(Transpose)
   raw_stats = filtered_df[["평균기온", "최저기온", "최고기온"]].describe()
   raw_stats = raw_stats.rename(
       index={
