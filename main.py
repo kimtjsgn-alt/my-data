@@ -12,7 +12,8 @@ st.set_page_config(
 # 제목 및 설명
 st.title("🌡️ 지난 100년간 서울의 기온은 어떻게 바뀌었을까?")
 st.markdown(
-    "본 애플리케이션은 기상청 서울 관측 데이터(`seoul.csv`)를 바탕으로 지난 100여 년간의 연평균 기온 변화 추이를 분석합니다."
+    "본 애플리케이션은 기상청 서울 관측 데이터(seoul.csv)를 바탕으로 지난 100여 년간의 연평균"
+    " 기온 변화 추이를 분석합니다."
 )
 
 
@@ -25,9 +26,10 @@ def load_data():
   except Exception:
     df = pd.read_csv(url, encoding="utf-8")
 
-  # 컬럼명 공백 및 특수문자 정리
+  # 컬럼명 공백 제거
   df.columns = df.columns.str.strip()
 
+  # 컬럼명 표준화
   col_map = {}
   for col in df.columns:
     if "날짜" in col:
@@ -42,11 +44,13 @@ def load_data():
       col_map[col] = "최고기온"
   df = df.rename(columns=col_map)
 
-  # 날짜 및 숫자 변환
+  # 날짜 데이터 처리
   df["날짜"] = pd.to_datetime(df["날짜"])
   df["연도"] = df["날짜"].dt.year
 
-  for col in ["평균기온", "최저기온", "최고기온"]:
+  # 기온 데이터 수치형 변환
+  numeric_cols = ["평균기온", "최저기온", "최고기온"]
+  for col in numeric_cols:
     if col in df.columns:
       df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -59,7 +63,9 @@ with st.spinner("데이터를 불러오는 중입니다..."):
 # 사이드바 설정
 st.sidebar.header("🔍 데이터 필터 및 옵션")
 
-min_year, max_year = int(df["연도"].min()), int(df["연도"].max())
+min_year = int(df["연도"].min())
+max_year = int(df["연도"].max())
+
 year_range = st.sidebar.slider(
     "조회 연도 범위 선택",
     min_value=min_year,
@@ -71,10 +77,12 @@ window_size = st.sidebar.slider(
     "이동평균(Moving Average) 구간 (년)", min_value=1, max_value=20, value=10
 )
 
-# 데이터 필터링 및 연도별 집계 (최소 300일 이상 관측 연도)
+# 선택된 연도 범위로 데이터 필터링
 filtered_df = df[(df["연도"] >= year_range[0]) & (df["연도"] <= year_range[1])]
-valid_years = filtered_df.groupby("연도")["평균기온"].count()
-valid_years = valid_years[valid_years >= 300].index
+
+# 연도별 집계 (최소 300일 이상 관측된 해 기준)
+year_counts = filtered_df.groupby("연도")["평균기온"].count()
+valid_years = year_counts[year_counts >= 300].index
 
 annual_df = (
     filtered_df[filtered_df["연도"].isin(valid_years)]
@@ -89,11 +97,12 @@ annual_df = (
     .reset_index()
 )
 
+# 이동평균 계산
 annual_df[f"{window_size}년 이동평균"] = (
     annual_df["연평균기온"].rolling(window=window_size, min_periods=1).mean()
 )
 
-# 요약 지표 (Metrics)
+# 주요 지표 요약 (Metrics)
 st.subheader("📌 주요 기온 통계 요약")
 col1, col2, col3, col4 = st.columns(4)
 
@@ -126,7 +135,7 @@ if not annual_df.empty:
 
 st.markdown("---")
 
-# 인터랙티브 시각화 그래프
+# 메인 그래프
 st.subheader("📈 연평균 기온 변화 추이")
 
 fig = go.Figure()
@@ -144,7 +153,7 @@ fig.add_trace(
     )
 )
 
-# 이동평균선
+# 이동평균 선 그래프
 fig.add_trace(
     go.Scatter(
         x=annual_df["연도"],
@@ -152,7 +161,8 @@ fig.add_trace(
         mode="lines",
         name=f"{window_size}년 이동평균",
         line=dict(color="#d62728", width=3, dash="dash"),
-        hovertemplate="%{x}년: %{y:.2f}°C<extra></extra>",
+        hovertemplate="%{x}년 (%{text}): %{y:.2f}°C<extra></extra>",
+        text=[f"{window_size}년 이동평균"] * len(annual_df),
     )
 )
 
@@ -186,11 +196,90 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# 세부 분석 탭
-st.subheader("📊 세부 데이터 및 상세 비교")
-tab1, tab2 = st.tabs(["최저/최고 기온 범위", "데이터 테이블"])
+# 데이터 분석 및 요약 통계 탭
+st.subheader("📊 데이터 분석 및 요약 통계")
+tab1, tab2, tab3 = st.tabs(
+    ["📋 원본데이터 요약 통계", "🌡️ 최저/최고 기온 범위", "📑 연도별 데이터 테이블"]
+)
 
 with tab1:
+  st.markdown("#### 📝 일별 원본 데이터 기술 통계 (Summary Statistics)")
+  st.caption(
+      "선택한 연도 범위 내 전체 일별 기온 데이터의 개수, 평균, 표준편차, 최소/최대값,"
+      " 사분위수 정보입니다."
+  )
+
+  # 일별 데이터 요약통계 계산
+  raw_stats = filtered_df[["평균기온", "최저기온", "최고기온"]].describe().T
+  raw_stats = raw_stats.rename(
+      columns={
+          "count": "데이터 개수(일)",
+          "mean": "평균",
+          "std": "표준편차",
+          "min": "최소값",
+          "25%": "1사분위수(25%)",
+          "50%": "중앙값(50%)",
+          "75%": "3사분위수(75%)",
+          "max": "최대값",
+      }
+  )
+
+  st.dataframe(
+      raw_stats.style.format({
+          "데이터 개수(일)": "{:,.0f}",
+          "평균": "{:.2f} °C",
+          "표준편차": "{:.2f}",
+          "최소값": "{:.1f} °C",
+          "1사분위수(25%)": "{:.1f} °C",
+          "중앙값(50%)": "{:.1f} °C",
+          "3사분위수(75%)": "{:.1f} °C",
+          "최대값": "{:.1f} °C",
+      }),
+      use_container_width=True,
+  )
+
+  st.markdown("---")
+  st.markdown("#### 📅 연도별 집계 데이터 기술 통계")
+  st.caption(
+      "선택한 연도 범위 내 연도별 집계 지표(연평균, 연최고, 연최저)에 대한 요약"
+      " 통계입니다."
+  )
+
+  annual_stats = (
+      annual_df[
+          ["연평균기온", "연평균최저기온", "연평균최고기온", "연최고기온", "연최저기온"]
+      ]
+      .describe()
+      .T
+  )
+  annual_stats = annual_stats.rename(
+      columns={
+          "count": "연도 수(개)",
+          "mean": "평균",
+          "std": "표준편차",
+          "min": "최소값",
+          "25%": "1사분위수(25%)",
+          "50%": "중앙값(50%)",
+          "75%": "3사분위수(75%)",
+          "max": "최대값",
+      }
+  )
+
+  st.dataframe(
+      annual_stats.style.format({
+          "연도 수(개)": "{:,.0f}",
+          "평균": "{:.2f} °C",
+          "표준편차": "{:.2f}",
+          "최소값": "{:.1f} °C",
+          "1사분위수(25%)": "{:.1f} °C",
+          "중앙값(50%)": "{:.1f} °C",
+          "3사분위수(75%)": "{:.1f} °C",
+          "최대값": "{:.1f} °C",
+      }),
+      use_container_width=True,
+  )
+
+with tab2:
   fig_range = go.Figure()
   fig_range.add_trace(
       go.Scatter(
@@ -228,7 +317,7 @@ with tab1:
   )
   st.plotly_chart(fig_range, use_container_width=True)
 
-with tab2:
+with tab3:
   st.dataframe(
       annual_df.style.format({
           "연평균기온": "{:.2f} °C",
